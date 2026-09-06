@@ -13,13 +13,35 @@ _netdoc_ifaces() {
   (( $#ifaces )) && _describe -t interfaces 'interface' ifaces
 }
 
+# Local snapshot files, for the flags whose positionals are .ndoc files rather
+# than targets. `.ndoc` is offered as its own tag first because that is what
+# these flags read, with every file behind it: netdoc does not require the
+# extension, so a snapshot saved under another name must stay completable.
+# Bash and Fish offer all files here, and this keeps the three in step.
+_netdoc_snapshots() {
+  _alternative \
+    'snapshots:snapshot file:_files -g "*.ndoc"' \
+    'files:file:_files'
+}
+
+# Positional arguments are normally targets -- hostnames, URLs and IP literals,
+# none of them enumerable -- so completion offers nothing rather than local
+# filenames. The exceptions are the two arguments of --compare, and of
+# --two-sided when it is offline: those are local snapshots.
+#
+# `--two-sided --via` is the case worth stating, because it inverts: side B is
+# then a live target, not a file, so file completion has to stay off. That is
+# the same condition the Bash and Fish completions already carry.
+_netdoc_positional() {
+  if (( ${words[(I)(--compare|-compare)]} )); then
+    _netdoc_snapshots
+  elif (( ${words[(I)(--two-sided|-two-sided)]} )) && (( ! ${words[(I)(--via|-via)]} )); then
+    _netdoc_snapshots
+  fi
+}
+
 # No -s: it would let single-letter options stack, and the single-dash long
 # spellings below (-json) would be read as stacked letters.
-# Targets are hostnames, URLs, and IP literals, none of them enumerable, so
-# the positional completes to nothing rather than to local filenames. That
-# holds for the two snapshot files of --compare and offline --two-sided too:
-# one positional spec cannot be a target here and a filename there, and
-# offering files for every target is the worse of the two mistakes.
 _arguments \
   '(--toolbox -toolbox --json -json)'{--toolbox,-toolbox}'[start in toolbox mode]' \
   '(--json -json --toolbox -toolbox)'{--json,-json}'[run the checks headless and print a JSON report]' \
@@ -43,4 +65,4 @@ _arguments \
   '(--timeout -timeout)'{--timeout,-timeout}'[per-check probe timeout (default 4s)]:duration:' \
   '(- *)'{--version,-version}'[print version and exit]' \
   '(- *)'{--help,-help,-h}'[print usage and exit]' \
-  ':target:'
+  '*:target:_netdoc_positional'
