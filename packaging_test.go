@@ -494,16 +494,25 @@ func TestShippedSurfacesOfferTheRealProbeIDs(t *testing.T) {
 		{"packaging/completions/netdoc.bash", `(?s)-check \| --check \| -skip \| --skip\).*?compgen -P "\$prefix" -W "([^"]*)".*?
 \s*;;`},
 		{"packaging/completions/netdoc.zsh", `(?m)^\s*_values -s , 'probe ID' (.*)$`},
-		{"packaging/completions/netdoc.fish", `(?m)^complete -c netdoc -o check [^
-]*\
-[ 	]*-a '([^']*)'$`},
-		{"packaging/completions/netdoc.fish", `(?m)^complete -c netdoc -o skip [^
-]*\
-[ 	]*-a '([^']*)'$`},
+		{"packaging/completions/netdoc.fish", `(?m)^set -l netdoc_probes (.*)$`},
 	}
 	for _, completion := range completions {
 		if got := completionVocabulary(t, completion.path, completion.pattern); !slices.Equal(got, want) {
 			t.Errorf("%s offers probe IDs %v, want %v", completion.path, got, want)
+		}
+	}
+	// The fish file names that list once, so -check and -skip are each checked
+	// to offer it, and to offer it through __fish_complete_list: a plain -a
+	// replaces the whole comma-separated token, and without -f the flag falls
+	// back to completing filenames.
+	fish, err := os.ReadFile("packaging/completions/netdoc.fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []string{"check", "skip"} {
+		declaration := regexp.MustCompile(`(?m)^complete -c netdoc -o ` + flag + ` [^\n]* -f [^\n]*\\\n[ \t]*-a "\(__fish_complete_list , \\"printf '%s\\n' \$netdoc_probes\\"\)"$`)
+		if !declaration.Match(fish) {
+			t.Errorf("packaging/completions/netdoc.fish: -%s must complete $netdoc_probes through __fish_complete_list and pass -f", flag)
 		}
 	}
 }
