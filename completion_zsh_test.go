@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -81,19 +82,23 @@ func completionMatches(t *testing.T, dir, cmdline string) string {
 
 	// compinit reads the completion by the name it is installed under.
 	linked := filepath.Join(t.TempDir(), "_netdoc")
+	//nolint:gosec // G304: the path is this repository's own completion file, joined from constants.
 	source, err := os.ReadFile(filepath.Join(completions, "netdoc.zsh"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	//nolint:gosec // G703: linked is under the test's own TempDir, not caller input.
 	if err := os.WriteFile(linked, source, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
+	//nolint:gosec // G204: the binary is zsh from PATH and the arguments are test-owned paths and lines.
 	cmd := exec.Command(zsh, probe, filepath.Dir(linked), cmdline)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 77 {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 77 {
 			t.Skip("this zsh has no zpty module")
 		}
 		t.Fatalf("zsh probe failed: %v\n%s", err, out)
@@ -138,8 +143,22 @@ func TestZshCompletionOffersSnapshotsOnlyWhereTheyAreRead(t *testing.T) {
 			files: true,
 		},
 		{
+			name: "compare takes a second snapshot",
+			// Both arguments are snapshots, so the rest argument has to be
+			// '*:snapshot:', not ':snapshot:'. beta.txt is the one typed and
+			// alpha.ndoc the one looked for, because the captured screen holds
+			// the echoed line too and a match already on it proves nothing.
+			line:  "netdoc --compare beta.txt ",
+			files: true,
+		},
+		{
 			name:  "offline two-sided takes snapshots",
 			line:  "netdoc --two-sided ",
+			files: true,
+		},
+		{
+			name:  "offline two-sided takes a second snapshot",
+			line:  "netdoc --two-sided beta.txt ",
 			files: true,
 		},
 		{
@@ -148,6 +167,21 @@ func TestZshCompletionOffersSnapshotsOnlyWhereTheyAreRead(t *testing.T) {
 			// Side B is a host, not a file. Bash and Fish carry the same
 			// condition; a file offered here would be wrong in all three.
 			files: false,
+		},
+		{
+			name: "two-sided with an attached via value has a live side B",
+			line: "netdoc --two-sided --via=h1 ",
+			// --via=h1 is the same run as --via h1, so it has to reach the
+			// same answer. _arguments does not read the attached value as the
+			// option, so it spends the positional here and leaves the flags.
+			files: false,
+			flags: true,
+		},
+		{
+			name:  "two-sided with a single-dash attached via value has a live side B",
+			line:  "netdoc --two-sided -via=h1 ",
+			files: false,
+			flags: true,
 		},
 		{
 			name: "an ordinary target is not a filename",

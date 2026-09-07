@@ -38,11 +38,13 @@ _netdoc_snapshots() {
 #
 # `--two-sided --via` is the case worth stating, because it inverts: side B is
 # then a live target, not a file, so file completion has to stay off. That is
-# the same condition the Bash and Fish completions already carry.
+# the same condition the Bash and Fish completions already carry. The value can
+# be a separate word or joined with `=`, and both spellings mean the same run,
+# so the pattern has to match `--via=host` as well as `--via host`.
 _netdoc_wants_snapshots() {
   (( ${words[(I)(--compare|-compare)]} )) && return 0
   (( ${words[(I)(--two-sided|-two-sided)]} )) &&
-    (( ! ${words[(I)(--via|-via)]} )) && return 0
+    (( ! ${words[(I)(--via|-via)(|=*)]} )) && return 0
   return 1
 }
 
