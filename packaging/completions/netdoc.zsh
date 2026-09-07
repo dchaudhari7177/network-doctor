@@ -32,13 +32,26 @@ _netdoc_snapshots() {
 # `--two-sided --via` is the case worth stating, because it inverts: side B is
 # then a live target, not a file, so file completion has to stay off. That is
 # the same condition the Bash and Fish completions already carry.
-_netdoc_positional() {
-  if (( ${words[(I)(--compare|-compare)]} )); then
-    _netdoc_snapshots
-  elif (( ${words[(I)(--two-sided|-two-sided)]} )) && (( ! ${words[(I)(--via|-via)]} )); then
-    _netdoc_snapshots
-  fi
+_netdoc_wants_snapshots() {
+  (( ${words[(I)(--compare|-compare)]} )) && return 0
+  (( ${words[(I)(--two-sided|-two-sided)]} )) &&
+    (( ! ${words[(I)(--via|-via)]} )) && return 0
+  return 1
 }
+
+# Which positional spec applies is decided here rather than inside a
+# `*:target:` action, and that placement is the whole point. A rest-argument
+# spec keeps consuming positionals, so when its action declines to add matches
+# _arguments has nothing left to fall back to: `netdoc example.com <TAB>` then
+# offers nothing at all, where it used to offer the flag list. Choosing the
+# spec up front keeps the ordinary case exactly the single `:target:` it has
+# always been, and the flags keep coming back.
+local -a _netdoc_rest
+if _netdoc_wants_snapshots; then
+  _netdoc_rest=( '*:snapshot:_netdoc_snapshots' )
+else
+  _netdoc_rest=( ':target:' )
+fi
 
 # No -s: it would let single-letter options stack, and the single-dash long
 # spellings below (-json) would be read as stacked letters.
@@ -65,4 +78,4 @@ _arguments \
   '(--timeout -timeout)'{--timeout,-timeout}'[per-check probe timeout (default 4s)]:duration:' \
   '(- *)'{--version,-version}'[print version and exit]' \
   '(- *)'{--help,-help,-h}'[print usage and exit]' \
-  '*:target:_netdoc_positional'
+  "${_netdoc_rest[@]}"
