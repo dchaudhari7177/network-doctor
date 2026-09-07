@@ -24,22 +24,31 @@ complete -c netdoc -o two-sided -l two-sided -d 'Localize two saved snapshots, o
 # file completion comes back only while --via is absent.
 complete -c netdoc -n '__fish_seen_argument -o compare -l compare' -F
 complete -c netdoc -n '__fish_seen_argument -o two-sided -l two-sided; and not __fish_seen_argument -o via -l via' -F
-complete -c netdoc -o peer-listen -l peer-listen -r -d 'Listen for an authenticated peer on an exact IP:port (repeatable)'
+complete -c netdoc -o peer-listen -l peer-listen -r -f -d 'Listen for an authenticated peer on an exact IP:port (repeatable)'
 complete -c netdoc -o peer-connect -l peer-connect -d 'Read a temporary pairing string and run a two-ended diagnosis'
 complete -c netdoc -o via -l via -r -f \
     -a '(__fish_print_hostnames)' \
     -d 'Run remotely, or provide side B for live two-sided diagnosis'
 complete -c netdoc -o list-checks -l list-checks -d 'List stable probe IDs and names, then exit'
-complete -c netdoc -o check -l check -r -d 'Run stable probe IDs (comma-separated; repeatable)'
-complete -c netdoc -o skip -l skip -r -d 'Skip stable probe IDs (comma-separated; repeatable)'
+# Stable probe IDs. Both flags take a comma-separated list, which a plain
+# `complete -a` cannot complete: it replaces the whole token, so the elements
+# already typed are lost. __fish_complete_list splits the token on the comma
+# and keeps that prefix. -f suppresses the file completion these two flags
+# would otherwise inherit. Kept in sync with StableProbes() by the packaging
+# test.
+set -l netdoc_probes iface internet_tcp quic_udp_443 proxy_connect dns dns_public dns_encrypted target_tcp path_mtu ssid tls http https ssh_banner smtp_banner
+complete -c netdoc -o check -l check -r -f -d 'Run stable probe IDs (comma-separated; repeatable)' \
+    -a "(__fish_complete_list , \"printf '%s\n' $netdoc_probes\")"
+complete -c netdoc -o skip -l skip -r -f -d 'Skip stable probe IDs (comma-separated; repeatable)' \
+    -a "(__fish_complete_list , \"printf '%s\n' $netdoc_probes\")"
 complete -c netdoc -o no-reference-egress -l no-reference-egress -d "Don't contact netdoc's own built-in reference services"
 complete -c netdoc -o no-history -l no-history -d "Don't read or write the saved target history"
 complete -c netdoc -o version -l version -d 'Print version and exit'
 complete -c netdoc -s h -o help -l help -d 'Print usage and exit'
 
-complete -c netdoc -o iface -l iface -r -d 'Bind probes to an interface name or exact local IP' \
+complete -c netdoc -o iface -l iface -r -f -d 'Bind probes to an interface name or exact local IP' \
     -a '(command ls /sys/class/net 2>/dev/null)'
-complete -c netdoc -o public-dns -l public-dns -r -d 'Second-opinion DNS resolver IP, empty to skip (default 8.8.8.8)'
-complete -c netdoc -o keys -l keys -r -d 'Keybinding preset for the TUI (default: default)' \
+complete -c netdoc -o public-dns -l public-dns -r -f -d 'Second-opinion DNS resolver IP, empty to skip (default 8.8.8.8)'
+complete -c netdoc -o keys -l keys -r -f -d 'Keybinding preset for the TUI (default: default)' \
     -a 'default vim'
-complete -c netdoc -o timeout -l timeout -r -d 'Per-check probe timeout (default 4s)'
+complete -c netdoc -o timeout -l timeout -r -f -d 'Per-check probe timeout (default 4s)'

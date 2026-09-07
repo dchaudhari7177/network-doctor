@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/heymaikol/network-doctor/internal/app"
+	"github.com/heymaikol/network-doctor/internal/diagnostic"
 	"github.com/heymaikol/network-doctor/internal/profile"
 	"github.com/heymaikol/network-doctor/internal/ui"
 	"gopkg.in/yaml.v3"
@@ -470,6 +471,96 @@ func TestShippedSurfacesOfferTheRealKeyPresets(t *testing.T) {
 	}
 	if got := manKeyPresets(string(data)); !slices.Equal(got, want) {
 		t.Errorf("packaging/netdoc.1 documents -keys values %v, want %v", got, want)
+	}
+}
+
+func TestShippedSurfacesOfferTheRealProbeIDs(t *testing.T) {
+	// -check and -skip take stable probe IDs, and the three completion files
+	// each carry their own copy of the list. StableProbes() is the source of
+	// truth, so this fails the build rather than letting a new or renamed probe
+	// leave the shells offering an ID that no longer exists.
+	probes := diagnostic.StableProbes()
+	want := make([]string, 0, len(probes))
+	for _, probe := range probes {
+		want = append(want, string(probe.ID))
+	}
+	if len(want) == 0 {
+		t.Fatal("StableProbes() returned nothing; this test would pass vacuously")
+	}
+
+	completions := []struct {
+		path, pattern string
+	}{
+		{"packaging/completions/netdoc.bash", `(?s)-check \| --check \| -skip \| --skip\).*?compgen -P "\$prefix" -W "([^"]*)".*?
+\s*;;`},
+		{"packaging/completions/netdoc.zsh", `(?m)^\s*_values -s , 'probe ID' (.*)$`},
+		{"packaging/completions/netdoc.fish", `(?m)^set -l netdoc_probes (.*)$`},
+	}
+	for _, completion := range completions {
+		if got := completionVocabulary(t, completion.path, completion.pattern); !slices.Equal(got, want) {
+			t.Errorf("%s offers probe IDs %v, want %v", completion.path, got, want)
+		}
+	}
+	// The fish file names that list once, so -check and -skip are each checked
+	// to offer it, and to offer it through __fish_complete_list: a plain -a
+	// replaces the whole comma-separated token, and without -f the flag falls
+	// back to completing filenames.
+	fish, err := os.ReadFile("packaging/completions/netdoc.fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []string{"check", "skip"} {
+		declaration := regexp.MustCompile(`(?m)^complete -c netdoc -o ` + flag + ` [^\n]* -f [^\n]*\\\n[ \t]*-a "\(__fish_complete_list , \\"printf '%s\\n' \$netdoc_probes\\"\)"$`)
+		if !declaration.Match(fish) {
+			t.Errorf("packaging/completions/netdoc.fish: -%s must complete $netdoc_probes through __fish_complete_list and pass -f", flag)
+		}
+	}
+}
+
+// The -f at the top of netdoc.fish suppresses file candidates for the whole
+// command, but an option-specific -r can quietly turn them back on for that
+// one option. Every value-taking option whose value is not a path therefore
+// has to repeat -f on its own declaration; the exceptions are the options
+// that genuinely take files, which stay spelled with -F.
+func TestFishKeepsNonPathValuesOffFileCompletion(t *testing.T) {
+	data, err := os.ReadFile("packaging/completions/netdoc.fish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fish := string(data)
+
+	// -profile, -check, -skip and -via gained -f when their value
+	// completions landed; the rest are the cases that still fell back to
+	// filenames. Kept as one list so a new non-path option has to opt out.
+	noFiles := []string{
+		"profile", "check", "skip", "via",
+		"peer-listen", "iface", "public-dns", "keys", "timeout",
+	}
+	for _, flag := range noFiles {
+		declaration := regexp.MustCompile(`(?m)^complete -c netdoc -o ` + flag + `[^\n]* -f`).FindString(fish)
+		if declaration == "" {
+			t.Errorf("packaging/completions/netdoc.fish: --%s takes a value that is not a path, so its declaration must pass -f", flag)
+			continue
+		}
+		if strings.Contains(declaration, " -F") {
+			t.Errorf("packaging/completions/netdoc.fish: --%s passes -F, which brings file candidates back", flag)
+		}
+	}
+
+	// -save and -support write .ndoc files, and the snapshot arguments of
+	// -compare and offline --two-sided are files too, so those keep -F.
+	for _, flag := range []string{"save", "support"} {
+		if !regexp.MustCompile(`(?m)^complete -c netdoc -o ` + flag + `[^\n]* -F`).MatchString(fish) {
+			t.Errorf("packaging/completions/netdoc.fish: --%s writes a file, so its declaration must keep -F", flag)
+		}
+	}
+	for _, condition := range []string{
+		`-n '__fish_seen_argument -o compare -l compare' -F`,
+		`-n '__fish_seen_argument -o two-sided -l two-sided; and not __fish_seen_argument -o via -l via' -F`,
+	} {
+		if !strings.Contains(fish, condition) {
+			t.Errorf("packaging/completions/netdoc.fish: snapshot file completion must stay gated behind %s", condition)
+		}
 	}
 }
 
