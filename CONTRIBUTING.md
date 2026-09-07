@@ -87,10 +87,11 @@ For an ordinary, focused pull request, run:
 ```
 
 That is gofmt, `go vet`, a `CGO_ENABLED=0` build, a macOS and Windows
-cross-compile, and `go test ./...`. It needs only a Go toolchain: no root, no
-network, no Docker, and it behaves the same on Linux, macOS and Windows. Add
-`--race` to include the race detector. CI runs the same script on Linux, so it
-cannot rot without someone noticing.
+cross-compile, and `go test ./...`. It needs a Go toolchain and a POSIX shell:
+no root, no network, no Docker. On Windows that shell is the Git Bash that
+ships with Git for Windows, or WSL; the checks themselves are the same three
+platforms over. Add `--race` to include the race detector. CI runs the same
+script on Linux, so it cannot rot without someone noticing.
 
 Then run the tests nearest your change and anything else clearly relevant to
 the files or behavior you touched.

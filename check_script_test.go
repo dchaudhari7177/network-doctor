@@ -71,6 +71,55 @@ func TestCheckScriptRunsTheFastChecksItDocuments(t *testing.T) {
 	}
 }
 
+func TestCheckScriptRunsTheOptionalModesItDocuments(t *testing.T) {
+	// --race and the help aliases are part of the documented command, and the
+	// test above would stay green if any of them were dropped: they are not
+	// among the checks it runs by default.
+	script := readCheckScriptCode(t)
+	for _, want := range []string{
+		"--race) race=1",
+		"go test -race ./...",
+		"-h | --help)",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("%s no longer handles %q", checkScript, want)
+		}
+	}
+}
+
+func TestCheckScriptUsageMatchesTheOptionsItAccepts(t *testing.T) {
+	// The help output is a slice of this file's own header comment, so an
+	// option can be added to the parser and never reach the usage text.
+	script := readCheckScript(t)
+	header, _, ok := strings.Cut(script, "\nset -eu")
+	if !ok {
+		t.Fatal("cannot find the end of the header comment")
+	}
+	for _, want := range []string{"./scripts/check", "--race"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("the usage text printed by --help does not mention %q", want)
+		}
+	}
+}
+
+func TestContributingStatesWhatTheCheckScriptNeedsToRun(t *testing.T) {
+	// The script is #!/bin/sh, so a Go toolchain alone is not enough on
+	// Windows. Saying otherwise sends a contributor looking for a bug in
+	// their setup.
+	body, err := os.ReadFile("CONTRIBUTING.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(body)
+	if !strings.Contains(doc, "POSIX shell") {
+		t.Error("CONTRIBUTING.md does not say the script needs a POSIX shell")
+	}
+	if strings.Contains(doc, "it behaves the same on Linux, macOS and Windows") {
+		t.Error("CONTRIBUTING.md claims the script runs the same everywhere; " +
+			"a Windows contributor needs Git Bash or WSL to run /bin/sh")
+	}
+}
+
 func TestCheckScriptLeavesTheExpensiveGateToCI(t *testing.T) {
 	// The value of a fast check is that it is fast. If one of these ever moves
 	// into it, that should be a deliberate edit to this list rather than a

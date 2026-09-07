@@ -393,7 +393,8 @@ the software or how issues are prioritized.
 
 For an ordinary, focused pull request, run `./scripts/check` -- gofmt, `go vet`,
 a `CGO_ENABLED=0` build, macOS and Windows cross-compiles, and `go test ./...`,
-with no root, network or Docker needed -- then the tests nearest your change and
+with no root, network or Docker needed (a Go toolchain and a POSIX shell: on
+Windows, Git Bash or WSL) -- then the tests nearest your change and
 any additional checks clearly relevant to the files or behavior you changed. That is almost all a small external contribution needs.
 The exhaustive gate below exists for CI, maintainership, releases, and the
 specific checks that apply to your change; a small contribution does not have
