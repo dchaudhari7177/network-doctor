@@ -2,23 +2,27 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
 
 // The fast contributor gate is a shell script, so nothing the Go build does
 // would notice it rotting. These tests pin the parts that would rot silently:
-// the file's existence and executable bit, the checks it is documented to run,
-// the ones it is documented to leave to CI, and the fact that CI runs it.
+// its committed executable mode, the checks it is documented to run, the ones
+// it is documented to leave to CI, that --race stays opt-in, that --help still
+// describes the options the parser accepts, and that CI runs the script.
 //
-// They deliberately assert on the script's content rather than executing it.
-// Running it from a test would recurse: the script's own `go test ./...` step
-// runs this file.
+// They assert on the script's content rather than running it, with one
+// exception: --help is checked by executing it, which is safe because usage()
+// prints and exits before the first check step. Running the script bare from a
+// test would recurse, because its own `go test ./...` step runs this file.
 
 const checkScript = "scripts/check"
 
 func readCheckScript(t *testing.T) string {
 	t.Helper()
+	// #nosec G304 -- checkScript is this file's own constant, not input.
 	body, err := os.ReadFile(checkScript)
 	if err != nil {
 		t.Fatalf("read %s: %v", checkScript, err)
@@ -26,15 +30,31 @@ func readCheckScript(t *testing.T) string {
 	return string(body)
 }
 
-// readCheckScriptCode returns the script with comment lines removed, so an
-// assertion that a command is absent is not satisfied or defeated by prose.
-// The script explains what it leaves to CI by naming those tools, and a naive
-// substring search over the whole file reads that explanation as a call.
+// readCheckScriptCode returns the script with comment lines and the usage()
+// here-document removed, so an assertion that a command is absent is not
+// satisfied or defeated by prose. The script explains what it leaves to CI by
+// naming those tools, in both places, and a naive substring search over the
+// whole file reads that explanation as a call.
 func readCheckScriptCode(t *testing.T) string {
 	t.Helper()
 	var code strings.Builder
+	inUsage := false
 	for _, line := range strings.Split(readCheckScript(t), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+		trimmed := strings.TrimSpace(line)
+		// The usage() here-document is prose for the same reason a comment
+		// is: it names the tools the script leaves to CI in order to explain
+		// the split, and a substring search would read those names as calls.
+		if strings.HasPrefix(trimmed, "cat <<") {
+			inUsage = true
+			continue
+		}
+		if inUsage {
+			if trimmed == "EOF" {
+				inUsage = false
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 		code.WriteString(line)
@@ -43,15 +63,22 @@ func readCheckScriptCode(t *testing.T) string {
 	return code.String()
 }
 
-func TestCheckScriptExistsAndIsExecutable(t *testing.T) {
-	info, err := os.Stat(checkScript)
+func TestCheckScriptIsCommittedExecutable(t *testing.T) {
+	// The documented invocation is `./scripts/check`, which needs the execute
+	// bit in the committed tree. The filesystem mode cannot be asserted here:
+	// a Windows checkout does not carry it. git's index does, so ask git.
+	out, err := exec.Command("git", "ls-files", "--stage", "--", checkScript).Output()
 	if err != nil {
-		t.Fatalf("stat %s: %v", checkScript, err)
+		t.Skipf("git unavailable, or this is not a checkout: %v", err)
 	}
-	// Checked through git rather than the filesystem mode, because a Windows
-	// checkout does not carry the bit but the committed tree must.
-	if info.Mode().IsRegular() && info.Size() == 0 {
-		t.Fatalf("%s is empty", checkScript)
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		t.Fatalf("%s is not tracked by git", checkScript)
+	}
+	if fields[0] != "100755" {
+		t.Errorf("%s is committed as mode %s, want 100755: ./%s would not be "+
+			"directly executable for a contributor who just cloned",
+			checkScript, fields[0], checkScript)
 	}
 }
 
@@ -87,18 +114,56 @@ func TestCheckScriptRunsTheOptionalModesItDocuments(t *testing.T) {
 	}
 }
 
-func TestCheckScriptUsageMatchesTheOptionsItAccepts(t *testing.T) {
-	// The help output is a slice of this file's own header comment, so an
-	// option can be added to the parser and never reach the usage text.
-	script := readCheckScript(t)
-	header, _, ok := strings.Cut(script, "\nset -eu")
+func TestCheckScriptKeepsTheRaceDetectorOptIn(t *testing.T) {
+	// The point of the fast check is that it is fast, and -race roughly
+	// doubles it. Asserting only that `go test -race ./...` appears somewhere
+	// stays green if it is promoted into the default path, so pin that it
+	// sits inside the `if [ "$race" -eq 1 ]` guard and nowhere else.
+	script := readCheckScriptCode(t)
+	const guard = `if [ "$race" -eq 1 ]; then`
+	beforeGuard, afterGuard, ok := strings.Cut(script, guard)
 	if !ok {
-		t.Fatal("cannot find the end of the header comment")
+		t.Fatalf("%s no longer guards the race step with %q", checkScript, guard)
 	}
-	for _, want := range []string{"./scripts/check", "--race"} {
-		if !strings.Contains(header, want) {
-			t.Errorf("the usage text printed by --help does not mention %q", want)
+	guarded, _, ok := strings.Cut(afterGuard, "\nfi")
+	if !ok {
+		t.Fatalf("%s: the %q block is never closed", checkScript, guard)
+	}
+	if !strings.Contains(guarded, "go test -race ./...") {
+		t.Errorf("%s no longer runs the race detector inside the --race guard", checkScript)
+	}
+	if strings.Contains(beforeGuard, "go test -race") {
+		t.Errorf("%s runs the race detector before the --race guard, so it is "+
+			"no longer opt-in and the fast check is no longer fast", checkScript)
+	}
+}
+
+func TestCheckScriptUsageMatchesTheOptionsItAccepts(t *testing.T) {
+	// Assert on what --help actually prints rather than on a slice of the
+	// file, so adding a header line cannot change the help text without
+	// this test noticing, and an option cannot be added to the parser
+	// without reaching the usage text.
+	//
+	// Running --help does not recurse the way running the script bare would:
+	// usage() prints and exits before the first check step.
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skipf("no POSIX shell on this machine: %v", err)
+	}
+	out, err := exec.Command(sh, checkScript, "--help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s --help: %v\n%s", checkScript, err, out)
+	}
+	help := string(out)
+	for _, want := range []string{"./scripts/check", "--race", "--help"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("the usage text printed by --help does not mention %q:\n%s", want, help)
 		}
+	}
+	// The network caveat is what a contributor on a cold module cache is
+	// most likely to be bitten by, so it has to survive a header edit too.
+	if !strings.Contains(help, "Network:") {
+		t.Errorf("--help no longer says when the Go toolchain needs the network:\n%s", help)
 	}
 }
 
@@ -106,6 +171,7 @@ func TestContributingStatesWhatTheCheckScriptNeedsToRun(t *testing.T) {
 	// The script is #!/bin/sh, so a Go toolchain alone is not enough on
 	// Windows. Saying otherwise sends a contributor looking for a bug in
 	// their setup.
+	// #nosec G304 -- a string literal, not input.
 	body, err := os.ReadFile("CONTRIBUTING.md")
 	if err != nil {
 		t.Fatal(err)
@@ -155,6 +221,7 @@ func TestCheckScriptNeedsNoPrivileges(t *testing.T) {
 func TestContinuousIntegrationRunsTheCheckScript(t *testing.T) {
 	// Without this the script is documentation that compiles nothing: it could
 	// break and no contributor would find out until they ran it.
+	// #nosec G304 -- a string literal, not input.
 	workflow, err := os.ReadFile(".github/workflows/ci.yml")
 	if err != nil {
 		t.Fatalf("read ci.yml: %v", err)
@@ -166,6 +233,7 @@ func TestContinuousIntegrationRunsTheCheckScript(t *testing.T) {
 
 func TestContributingAndREADMEPointAtTheCheckScript(t *testing.T) {
 	for _, doc := range []string{"CONTRIBUTING.md", "README.md"} {
+		// #nosec G304 -- doc comes from the fixed list on the line above.
 		body, err := os.ReadFile(doc)
 		if err != nil {
 			t.Fatalf("read %s: %v", doc, err)

@@ -1,31 +1,45 @@
 #!/bin/sh
-# Fast local validation for an ordinary pull request.
-#
-# Runs the checks a contributor should have run before opening one: the ones
-# that are fast, need no privileges, need no network, and behave the same on
-# every platform a contributor might be on.
-#
-# It deliberately does NOT reproduce the full gate in README.md#tests. Race,
-# fuzz, loopback-integration, namespace, acceptance and container suites, and
-# the pinned external tools (golangci-lint, govulncheck, goreleaser), all stay
-# in CI. Those are slower, several need Linux or Docker, and the pinned tools
-# download on first run. Making this script the whole gate would make it too
-# slow to run, which is the way a check like this stops being run at all.
-#
-# Usage:
-#   ./scripts/check            fast checks
-#   ./scripts/check --race     also run the race detector (slower, still local)
+# Fast local validation for an ordinary pull request. See usage() below.
 #
 # Exits non-zero on the first failure, so it is usable in a pre-push hook.
 
 set -eu
+
+# The help text is a here-document rather than a slice of this comment block,
+# so editing the header cannot silently change what --help prints.
+usage() {
+    cat <<'EOF'
+Fast local validation for an ordinary pull request.
+
+Runs the checks a contributor should have run before opening one: the ones
+that are fast, need no privileges, and behave the same on every platform a
+contributor might be on.
+
+Network: the checks themselves make no network calls, but the Go toolchain
+may. A cold or incomplete module cache downloads the module dependencies, and
+a Go older than the toolchain line in go.mod downloads that toolchain first.
+Once both are warm the script is offline.
+
+It deliberately does NOT reproduce the full gate in README.md#tests. Race,
+fuzz, loopback-integration, namespace, acceptance and container suites, and
+the pinned external tools (golangci-lint, govulncheck, goreleaser), all stay
+in CI. Those are slower, several need Linux or Docker, and the pinned tools
+download on first run. Making this script the whole gate would make it too
+slow to run, which is the way a check like this stops being run at all.
+
+Usage:
+  ./scripts/check            fast checks
+  ./scripts/check --race     also run the race detector (slower, still local)
+  ./scripts/check --help     print this message
+EOF
+}
 
 race=0
 for arg in "$@"; do
     case "$arg" in
         --race) race=1 ;;
         -h | --help)
-            sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+            usage
             exit 0
             ;;
         *)
