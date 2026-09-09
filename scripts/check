@@ -60,8 +60,16 @@ step() {
 # gofmt rather than `go fmt`: it reports rather than rewrites, so a formatting
 # problem fails the check instead of silently editing the working tree during
 # what the contributor asked to be a read-only verification.
+#
+# The file list comes from git rather than from `gofmt -l .`, because gofmt
+# walks every directory that does not start with "." or "_". That includes
+# untracked third-party trees `go build ./...` and golangci-lint both skip:
+# node_modules, and the vendor/ directory a local goreleaser run leaves behind
+# (see the before-hooks in .goreleaser.yaml). Reporting those fails the gate on
+# code no contributor can fix. -z and xargs -0 so the list survives a path with
+# a space in it.
 check_gofmt() {
-    unformatted=$(gofmt -l .)
+    unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
     if [ -n "$unformatted" ]; then
         printf 'These files are not gofmt-clean:\n%s\n' "$unformatted" >&2
         return 1

@@ -22,7 +22,6 @@ const checkScript = "scripts/check"
 
 func readCheckScript(t *testing.T) string {
 	t.Helper()
-	// #nosec G304 -- checkScript is this file's own constant, not input.
 	body, err := os.ReadFile(checkScript)
 	if err != nil {
 		t.Fatalf("read %s: %v", checkScript, err)
@@ -85,7 +84,7 @@ func TestCheckScriptIsCommittedExecutable(t *testing.T) {
 func TestCheckScriptRunsTheFastChecksItDocuments(t *testing.T) {
 	script := readCheckScriptCode(t)
 	for _, want := range []string{
-		"gofmt -l .",
+		"gofmt -l",
 		"go vet ./...",
 		"CGO_ENABLED=0 go build ./...",
 		"GOOS=darwin go build ./...",
@@ -95,6 +94,19 @@ func TestCheckScriptRunsTheFastChecksItDocuments(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Errorf("%s no longer runs %q", checkScript, want)
 		}
+	}
+}
+
+func TestCheckScriptTakesTheGofmtFileListFromGit(t *testing.T) {
+	// gofmt walks every directory that does not start with "." or "_", so a
+	// bare `gofmt -l .` also reports node_modules and the vendor/ tree a local
+	// goreleaser run leaves behind: untracked third-party sources that
+	// `go build ./...` and golangci-lint both skip. That failed the gate on
+	// code no contributor can fix, so the file list comes from git.
+	script := readCheckScriptCode(t)
+	if !strings.Contains(script, "git ls-files") {
+		t.Errorf("%s no longer takes the gofmt file list from git, so it can "+
+			"fail on untracked vendor/ or node_modules/ sources", checkScript)
 	}
 }
 
@@ -146,11 +158,10 @@ func TestCheckScriptUsageMatchesTheOptionsItAccepts(t *testing.T) {
 	//
 	// Running --help does not recurse the way running the script bare would:
 	// usage() prints and exits before the first check step.
-	sh, err := exec.LookPath("sh")
-	if err != nil {
+	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skipf("no POSIX shell on this machine: %v", err)
 	}
-	out, err := exec.Command(sh, checkScript, "--help").CombinedOutput()
+	out, err := exec.Command("sh", checkScript, "--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s --help: %v\n%s", checkScript, err, out)
 	}
@@ -171,7 +182,6 @@ func TestContributingStatesWhatTheCheckScriptNeedsToRun(t *testing.T) {
 	// The script is #!/bin/sh, so a Go toolchain alone is not enough on
 	// Windows. Saying otherwise sends a contributor looking for a bug in
 	// their setup.
-	// #nosec G304 -- a string literal, not input.
 	body, err := os.ReadFile("CONTRIBUTING.md")
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +231,6 @@ func TestCheckScriptNeedsNoPrivileges(t *testing.T) {
 func TestContinuousIntegrationRunsTheCheckScript(t *testing.T) {
 	// Without this the script is documentation that compiles nothing: it could
 	// break and no contributor would find out until they ran it.
-	// #nosec G304 -- a string literal, not input.
 	workflow, err := os.ReadFile(".github/workflows/ci.yml")
 	if err != nil {
 		t.Fatalf("read ci.yml: %v", err)
